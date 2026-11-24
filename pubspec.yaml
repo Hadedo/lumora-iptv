@@ -34,7 +34,7 @@ dependencies:
   # الواجهة
   google_fonts: ^6.2.1
   cached_network_image: ^3.3.1
-  intl: ^0.19.0
+  intl: ^0.20.2
 
   # النظام (إصدارات متوافقة مع media_kit_video)
   file_picker: ^8.0.3
