@@ -1,0 +1,56 @@
+name: Build Lumora APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.24.5"
+          cache: true
+
+      - name: Generate Android project
+        run: |
+          mkdir -p /tmp/keep
+          if [ -f android/app/src/main/AndroidManifest.xml ]; then
+            cp android/app/src/main/AndroidManifest.xml /tmp/keep/AndroidManifest.xml
+          fi
+          flutter create --platforms=android --org com.lumora --project-name lumora .
+          if [ -f /tmp/keep/AndroidManifest.xml ]; then
+            cp /tmp/keep/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          fi
+          rm -f test/widget_test.dart
+
+      - name: Install packages
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumora-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 30
