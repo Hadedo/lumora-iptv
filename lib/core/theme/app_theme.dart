@@ -103,7 +103,7 @@ class AppTheme {
         }),
       ),
 
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: p.surface,
         elevation: 0,
         margin: EdgeInsets.zero,
@@ -260,7 +260,7 @@ class AppTheme {
         ),
       ),
 
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: p.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
