@@ -27,7 +27,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: "3.35.x"
+          flutter-version: "3.35.7"
           cache: true
 
       - name: Generate Android project
@@ -41,6 +41,19 @@ jobs:
             cp /tmp/keep/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
           fi
           rm -f test/widget_test.dart
+
+      - name: Ensure network permissions
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+            sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' "$MANIFEST"
+          fi
+          if ! grep -q "android.permission.ACCESS_NETWORK_STATE" "$MANIFEST"; then
+            sed -i 's|<application|<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application|' "$MANIFEST"
+          fi
+          if ! grep -q "usesCleartextTraffic" "$MANIFEST"; then
+            sed -i 's|<application|<application android:usesCleartextTraffic="true"|' "$MANIFEST"
+          fi
 
       - name: Install packages
         run: flutter pub get
