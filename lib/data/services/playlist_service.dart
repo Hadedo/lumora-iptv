@@ -11,7 +11,20 @@ import '../parsers/m3u_parser.dart';
 import 'storage_service.dart';
 
 /// أنواع الأخطاء، والواجهة تحوّلها إلى رسائل مترجمة.
-enum PlaylistError { network, invalidUrl, invalidPlaylist, loginFailed, fileRead }
+/// network: لا يوجد إنترنت فعلاً في الجهاز.
+/// timeout: انتهت مهلة الاتصال بالخادم.
+/// unreachable: الإنترنت يعمل لكن الخادم لا يمكن الوصول إليه.
+/// serverError: الخادم ردّ برفض أو استجابة غير صالحة.
+enum PlaylistError {
+  network,
+  timeout,
+  unreachable,
+  serverError,
+  invalidUrl,
+  invalidPlaylist,
+  loginFailed,
+  fileRead,
+}
 
 class PlaylistException implements Exception {
   final PlaylistError error;
@@ -19,7 +32,8 @@ class PlaylistException implements Exception {
   const PlaylistException(this.error, [this.details]);
 
   @override
-  String toString() => 'PlaylistException(${error.name}${details != null ? ': $details' : ''})';
+  String toString() =>
+      'PlaylistException(${error.name}${details != null ? ': $details' : ''})';
 }
 
 /// يضيف القوائم ويحدّثها ويحذفها: تنزيل، تحليل، ثم حفظ في التخزين المحلي.
@@ -31,11 +45,15 @@ class PlaylistService {
   PlaylistService(this._storage, {Dio? dio})
       : _dio = dio ??
             Dio(BaseOptions(
-              connectTimeout: AppConstants.connectTimeout,
+              connectTimeout: const Duration(seconds: 20),
+              sendTimeout: const Duration(seconds: 20),
               receiveTimeout: AppConstants.playlistDownloadTimeout,
               followRedirects: true,
               maxRedirects: 5,
-              headers: {'User-Agent': AppConstants.streamUserAgent},
+              headers: {
+                'User-Agent': AppConstants.streamUserAgent,
+                'Accept': '*/*',
+              },
               validateStatus: (s) => s != null && s < 400,
             ));
 
@@ -100,7 +118,7 @@ class PlaylistService {
     required String password,
     String epgUrl = '',
   }) async {
-    final normalized = Playlist.normalizeServer(server);
+    final normalized = _cleanXtreamServer(server);
     final uri = Uri.tryParse(normalized);
     if (uri == null || uri.host.isEmpty) {
       throw const PlaylistException(PlaylistError.invalidUrl);
@@ -174,7 +192,7 @@ class PlaylistService {
     if (p.isFile) {
       try {
         final bytes = await File(p.source).readAsBytes();
-        return _decode(bytes);
+        return await _decode(bytes);
       } catch (e) {
         throw PlaylistException(PlaylistError.fileRead, e.toString());
       }
@@ -184,7 +202,7 @@ class PlaylistService {
 
   /// تنزيل مع إعادة محاولة بتأخير متصاعد. أخطاء 4xx لا تُعاد لأنها لن تنجح.
   Future<String> _download(String url) async {
-    Object? last;
+    DioException? last;
     for (var attempt = 0; attempt <= AppConstants.networkRetries; attempt++) {
       try {
         final res = await _dio.get<List<int>>(
@@ -195,17 +213,23 @@ class PlaylistService {
         if (data == null || data.isEmpty) {
           throw const PlaylistException(PlaylistError.invalidPlaylist);
         }
-        return _decode(data);
+        return await _decode(data);
       } on DioException catch (e) {
         last = e;
         final code = e.response?.statusCode;
         if (code != null && code >= 400 && code < 500) break;
         if (attempt < AppConstants.networkRetries) {
-          await Future<void>.delayed(AppConstants.retryBaseDelay * (attempt + 1));
+          await Future<void>.delayed(
+            AppConstants.retryBaseDelay * (attempt + 1),
+          );
         }
       }
     }
-    throw PlaylistException(PlaylistError.network, last?.toString());
+    final err = last;
+    if (err == null) {
+      throw const PlaylistException(PlaylistError.unreachable);
+    }
+    throw await _classify(err);
   }
 
   Future<String> _decode(List<int> bytes) {
@@ -222,26 +246,114 @@ class PlaylistService {
         p.xtreamAuthUri,
         options: Options(
           responseType: ResponseType.plain,
-          receiveTimeout: AppConstants.receiveTimeout,
+          receiveTimeout: const Duration(seconds: 40),
         ),
       );
-      final body = res.data ?? '';
-      final json = jsonDecode(body);
+
+      final body = (res.data ?? '').replaceFirst('\uFEFF', '').trim();
+      if (body.isEmpty || body == '[]' || body == '{}') {
+        throw const PlaylistException(PlaylistError.loginFailed);
+      }
+
+      dynamic json;
+      try {
+        json = jsonDecode(body);
+      } on FormatException {
+        // الخادم ردّ بصفحة غير JSON (حظر أو خطأ)، وليس خطأ في الحساب.
+        throw const PlaylistException(
+          PlaylistError.serverError,
+          'Invalid response',
+        );
+      }
+
       final info = json is Map ? json['user_info'] : null;
-      final auth = info is Map ? info['auth'] : null;
+      if (info is! Map) {
+        throw const PlaylistException(PlaylistError.loginFailed);
+      }
+      final auth = info['auth'];
       if (auth == 1 || auth == '1' || auth == true) return;
       throw const PlaylistException(PlaylistError.loginFailed);
     } on PlaylistException {
       rethrow;
     } on DioException catch (e) {
-      final code = e.response?.statusCode;
-      if (code == 401 || code == 403) {
-        throw const PlaylistException(PlaylistError.loginFailed);
-      }
-      throw PlaylistException(PlaylistError.network, e.toString());
-    } on FormatException {
-      throw const PlaylistException(PlaylistError.loginFailed);
+      throw await _classify(e, forLogin: true);
     }
+  }
+
+  /// يحوّل خطأ Dio إلى سبب دقيق بدل رسالة «لا يوجد إنترنت» لكل شيء.
+  Future<PlaylistException> _classify(
+    DioException e, {
+    bool forLogin = false,
+  }) async {
+    final code = e.response?.statusCode;
+
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return const PlaylistException(PlaylistError.timeout);
+
+      case DioExceptionType.badCertificate:
+        return const PlaylistException(PlaylistError.unreachable, 'SSL');
+
+      case DioExceptionType.badResponse:
+        if (forLogin && (code == 401 || code == 403)) {
+          return const PlaylistException(PlaylistError.loginFailed);
+        }
+        return PlaylistException(
+          PlaylistError.serverError,
+          code == null ? null : 'HTTP $code',
+        );
+
+      case DioExceptionType.cancel:
+        return const PlaylistException(PlaylistError.unreachable, 'cancelled');
+
+      case DioExceptionType.connectionError:
+      case DioExceptionType.unknown:
+        {
+          // نفرّق بين انقطاع الإنترنت فعلاً وتعذّر الوصول إلى الخادم.
+          final online = await _hasInternet();
+          return PlaylistException(
+            online ? PlaylistError.unreachable : PlaylistError.network,
+            e.error?.toString(),
+          );
+        }
+    }
+  }
+
+  /// فحص سريع: هل يستطيع الجهاز الوصول لأي موقع معروف؟
+  Future<bool> _hasInternet() async {
+    const hosts = ['one.one.one.one', 'google.com'];
+    for (final h in hosts) {
+      try {
+        final r = await InternetAddress.lookup(h)
+            .timeout(const Duration(seconds: 4));
+        if (r.isNotEmpty && r.first.rawAddress.isNotEmpty) return true;
+      } catch (_) {
+        // نجرّب العنوان التالي.
+      }
+    }
+    return false;
+  }
+
+  /// ينظّف عنوان خادم Xtream: يزيل المسافات والشرطة الأخيرة واسم الملف
+  /// (player_api.php / get.php ...) والوسائط، ويضيف http:// عند غيابه.
+  String _cleanXtreamServer(String input) {
+    var s = input.replaceAll(RegExp(r'\s'), '');
+    if (s.isEmpty) return s;
+    if (!s.startsWith('http://') && !s.startsWith('https://')) {
+      s = 'http://$s';
+    }
+    final u = Uri.tryParse(s);
+    if (u == null || u.host.isEmpty) return s;
+
+    final segments = u.path.split('/').where((e) => e.isNotEmpty).toList();
+    if (segments.isNotEmpty && segments.last.toLowerCase().endsWith('.php')) {
+      segments.removeLast();
+    }
+    final path = segments.isEmpty ? '' : '/${segments.join('/')}';
+    final port = u.hasPort ? ':${u.port}' : '';
+    return '${u.scheme}://${u.host}$port$path';
   }
 
   String _normalizeUrl(String input) {
