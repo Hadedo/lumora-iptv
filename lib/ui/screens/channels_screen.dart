@@ -27,9 +27,16 @@ class _ChipData {
 
 String _errorText(AppStrings s, Object e) {
   if (e is PlaylistException) {
+    final d = (e.details ?? '').trim();
     switch (e.error) {
       case PlaylistError.network:
         return s.noInternet;
+      case PlaylistError.timeout:
+        return s.connectionTimeout;
+      case PlaylistError.unreachable:
+        return s.serverUnreachable;
+      case PlaylistError.serverError:
+        return d.isEmpty ? s.serverError : '${s.serverError} ($d)';
       case PlaylistError.invalidUrl:
         return s.invalidUrl;
       case PlaylistError.invalidPlaylist:
