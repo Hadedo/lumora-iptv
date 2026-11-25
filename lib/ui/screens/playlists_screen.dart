@@ -233,14 +233,16 @@ class _PlaylistCard extends StatelessWidget {
   });
 
   IconData get _icon {
-    switch (playlist.type) {
-      case PlaylistType.url:
-        return Icons.link_rounded;
-      case PlaylistType.file:
-        return Icons.insert_drive_file_rounded;
-      case PlaylistType.xtream:
-        return Icons.dns_rounded;
+    if (playlist.type == PlaylistType.url) {
+      return Icons.link_rounded;
     }
+    if (playlist.type == PlaylistType.file) {
+      return Icons.insert_drive_file_rounded;
+    }
+    if (playlist.type == PlaylistType.xtream) {
+      return Icons.dns_rounded;
+    }
+    return Icons.playlist_play_rounded;
   }
 
   @override
