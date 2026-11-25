@@ -14,9 +14,16 @@ import '../splash_screen.dart';
 
 String _errorText(AppStrings s, Object e) {
   if (e is PlaylistException) {
+    final d = (e.details ?? '').trim();
     switch (e.error) {
       case PlaylistError.network:
         return s.noInternet;
+      case PlaylistError.timeout:
+        return s.connectionTimeout;
+      case PlaylistError.unreachable:
+        return s.serverUnreachable;
+      case PlaylistError.serverError:
+        return d.isEmpty ? s.serverError : '${s.serverError} ($d)';
       case PlaylistError.invalidUrl:
         return s.invalidUrl;
       case PlaylistError.invalidPlaylist:
@@ -587,7 +594,7 @@ class _AddPlaylistSheetState extends ConsumerState<_AddPlaylistSheet> {
                     ),
                     const ButtonSegment(
                       value: 2,
-                      icon: Icon(Icons.dns_rounded, size: 18),
+                      icon: const Icon(Icons.dns_rounded, size: 18),
                       label: Text('Xtream', maxLines: 1),
                     ),
                   ],
