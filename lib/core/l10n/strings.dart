@@ -112,6 +112,16 @@ class AppStrings {
   String get fieldRequired => _t('هذا الحقل مطلوب', 'This field is required');
   String get loginFailed =>
       _t('فشل تسجيل الدخول، تحقق من البيانات', 'Login failed, check your details');
+  String get connectionTimeout =>
+      _t('انتهت مهلة الاتصال بالخادم', 'The connection to the server timed out');
+  String get serverUnreachable => _t(
+        'تعذّر الوصول إلى الخادم، تحقق من العنوان والمنفذ',
+        'Cannot reach the server, check the address and port',
+      );
+  String get serverError => _t(
+        'الخادم رفض الطلب أو أعاد استجابة غير صالحة',
+        'The server rejected the request or sent an invalid response',
+      );
   String get deletePlaylistTitle => _t('حذف القائمة؟', 'Delete playlist?');
   String get deletePlaylistBody =>
       _t('ستُحذف القائمة وكل قنواتها من الجهاز.', 'The playlist and its channels will be removed from this device.');
