@@ -1,4 +1,4 @@
-import '../../core/utils/constants.dart';
+import 'dart:core';
 
 /// نوع مصدر القائمة.
 enum PlaylistType {
@@ -64,16 +64,18 @@ class Playlist {
       id: now.toRadixString(36),
       name: name.trim(),
       type: type,
-      source: type == PlaylistType.xtream ? normalizeServer(source) : source.trim(),
+      source: type == PlaylistType.xtream
+          ? normalizeServer(source)
+          : source.trim(),
       username: username.trim(),
       password: password.trim(),
       epgUrl: epgUrl.trim(),
     );
   }
 
-  bool get isXtream => type == PlaylistType.xtream;
-  bool get isFile => type == PlaylistType.file;
   bool get isUrl => type == PlaylistType.url;
+  bool get isFile => type == PlaylistType.file;
+  bool get isXtream => type == PlaylistType.xtream;
   bool get hasBeenUpdated => updatedAt > 0;
 
   DateTime? get updatedDate =>
@@ -81,7 +83,7 @@ class Playlist {
 
   // ───────── روابط Xtream Codes ─────────
 
-  /// يضيف http:// عند غيابه ويزيل الشرطة الأخيرة والمسارات الزائدة.
+  /// يضيف http:// عند غيابه ويزيل الشرطة الأخيرة.
   static String normalizeServer(String input) {
     var s = input.trim();
     if (s.isEmpty) return s;
@@ -94,38 +96,37 @@ class Playlist {
     return s;
   }
 
-  Uri _xtreamUri(String path, [Map<String, String> extra = const {}]) {
+  Uri _xtreamUri(String path, Map<String, String> extra) {
     final base = Uri.parse(source);
     final basePath = base.path.endsWith('/') ? base.path : '${base.path}/';
-    return base.replace(
-      path: '$basePath$path',
-      queryParameters: {
-        'username': username,
-        'password': password,
-        ...extra,
-      },
-    );
+    final query = <String, String>{
+      'username': username,
+      'password': password,
+    };
+    query.addAll(extra);
+    return base.replace(path: '$basePath$path', queryParameters: query);
   }
 
   /// رابط التحقق من الحساب.
-  Uri get xtreamAuthUri => _xtreamUri(AppConstants.xtreamApiPath);
+  Uri get xtreamAuthUri => _xtreamUri('player_api.php', <String, String>{});
 
   /// رابط قائمة M3U الكاملة.
   Uri get xtreamPlaylistUri => _xtreamUri(
-        AppConstants.xtreamPlaylistPath,
-        {'type': 'm3u_plus', 'output': 'ts'},
+        'get.php',
+        <String, String>{'type': 'm3u_plus', 'output': 'ts'},
       );
 
   /// رابط دليل البرامج: المخصص إن وُجد، وإلا الافتراضي لـ Xtream.
   String get effectiveEpgUrl {
     if (epgUrl.isNotEmpty) return epgUrl;
-    if (isXtream) return _xtreamUri(AppConstants.xtreamEpgPath).toString();
+    if (isXtream) {
+      return _xtreamUri('xmltv.php', <String, String>{}).toString();
+    }
     return '';
   }
 
   /// الرابط الذي تُحمَّل منه القائمة (للنوعين url وxtream).
-  String get downloadUrl =>
-      isXtream ? xtreamPlaylistUri.toString() : source;
+  String get downloadUrl => isXtream ? xtreamPlaylistUri.toString() : source;
 
   Playlist copyWith({
     String? name,
@@ -149,4 +150,40 @@ class Playlist {
     );
   }
 
-  Map
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'id': id,
+      'name': name,
+      'type': type.key,
+      'source': source,
+      'username': username,
+      'password': password,
+      'epg': epgUrl,
+      'count': channelCount,
+      'updated': updatedAt,
+    };
+  }
+
+  factory Playlist.fromMap(Map<dynamic, dynamic> m) {
+    return Playlist(
+      id: (m['id'] ?? '') as String,
+      name: (m['name'] ?? '') as String,
+      type: PlaylistType.fromKey(m['type'] as String?),
+      source: (m['source'] ?? '') as String,
+      username: (m['username'] ?? '') as String,
+      password: (m['password'] ?? '') as String,
+      epgUrl: (m['epg'] ?? '') as String,
+      channelCount: (m['count'] ?? 0) as int,
+      updatedAt: (m['updated'] ?? 0) as int,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) => other is Playlist && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+
+  @override
+  String toString() => 'Playlist($name, ${type.key})';
+}
